@@ -1,3 +1,7 @@
 logs/
+test/resources/logs/
 **/__pycache__/
+**/.pytest_cache/
 res/
+.venv/
+.vscode/
