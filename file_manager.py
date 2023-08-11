@@ -13,22 +13,28 @@ import re
 logger = logging.getLogger('file-manager')
 
 # file name pattern "name (\d+).<ext>" is not enough to uniquely identify a file! We need to use contents
-def file_name_to_id(file_name) -> str:
+def file_name_to_id(file_name) -> Optional[str]:
     stat = os.stat(file_name)
     size = stat.st_size
+    is_dir = os.path.isdir(file_name)
 
-    # determine part of name expected to be shared among copies of a file
-    full_name, ext = os.path.splitext(file_name)
-    name_parts = [
-        part 
-        for part in re.split(r'\s+\((\d+)\)', full_name)
-        if part != ''
-    ]
+    if is_dir:
+        return None
+    # end if dir
+    else:
+        # determine part of name expected to be shared among copies of a file
+        full_name, ext = os.path.splitext(file_name)
+        name_parts = [
+            part 
+            for part in re.split(r'\s+\((\d+)\)', full_name)
+            if part != ''
+        ]
 
-    return f'{name_parts[0]}_size={size}{ext}'
+        return f'{name_parts[0]}_size={size}{ext}'
+    # end else file
 # end def
 
-def find_duplicate_files(parent_dir: str, res_dir: str) -> Dict:
+def find_duplicate_files(parent_dir: str, res_dir: str, skip_file_write=False, recursive=False) -> Tuple[Dict, List[str]]:
     prev_dir = os.getcwd()
     logger.info(f'move from {prev_dir} to {parent_dir}')
     os.chdir(os.path.expanduser(parent_dir))
@@ -40,40 +46,59 @@ def find_duplicate_files(parent_dir: str, res_dir: str) -> Dict:
     for file_name in os.listdir('.'):
         file_id = file_name_to_id(file_name)
 
-        if file_id not in index:
-            index[file_id] = []
-        # end new name
+        if file_id is None:
+            if recursive:
+                logger.warning(f'{file_name}/ is a directory. recursive find duplicates not yet supported')
+                index[file_name] = {}
+            else:
+                logger.info(f'skip directory {file_name}/')
+        # end if directory
+        else:
+            if file_id not in index:
+                index[file_id] = []
+            # end new name
 
-        index[file_id].append(file_name)
+            index[file_id].append(file_name)
 
-        if len(index[file_id]) > 1:
-            duplicates.append(file_name + '\n')
-            logger.debug(f'found duplicate {file_name} of {file_id}')
-        # end if duplicate
+            if len(index[file_id]) > 1:
+                duplicates.append(file_name)
+                logger.debug(f'found duplicate {file_name} of {file_id}')
+            # end if duplicate
+        # end if file
     # end for
 
-    index_dir = os.path.join(prev_dir, res_dir, parent_dir.replace('/', '_'))
-    os.makedirs(index_dir, exist_ok=True)
+    if not skip_file_write:
+        index_dir = os.path.join(prev_dir, res_dir, parent_dir.replace('/', '_'))
+        os.makedirs(index_dir, exist_ok=True)
 
-    index_file = os.path.join(index_dir, 'index.json')
-    with open(index_file, 'w') as f:
-        json.dump(index, fp=f, indent=2)
-        logger.info(f'grouped files index for {parent_dir} saved to {index_file}')
-    # end with
+        index_file = os.path.join(index_dir, 'index.json')
+        with open(index_file, 'w') as f:
+            json.dump(index, fp=f, indent=2)
+            logger.info(f'grouped files index for {parent_dir} saved to {index_file}')
+        # end with
+    # end file write
+    else:
+        logger.warning('skipped index file write')
+    # end skip
 
-    duplicates_dir = index_dir
-    os.makedirs(duplicates_dir, exist_ok=True)
+    if not skip_file_write:
+        duplicates_dir = index_dir
+        os.makedirs(duplicates_dir, exist_ok=True)
 
-    duplicates_file = os.path.join(duplicates_dir, 'duplicates.txt')
-    with open(duplicates_file, 'w') as f:
-        f.writelines(duplicates)
-        logger.info(f'saved {len(duplicates)} duplicate names to {duplicates_file}')
-    # end with
+        duplicates_file = os.path.join(duplicates_dir, 'duplicates.txt')
+        with open(duplicates_file, 'w') as f:
+            f.write('\n'.join(duplicates))
+            logger.info(f'saved {len(duplicates)} duplicate names to {duplicates_file}')
+        # end with
+    # end file write
+    else:
+        logger.warning('skipped duplicates file write')
+    # end skip
 
     logger.info(f'move back from {parent_dir} to {prev_dir}')
     os.chdir(prev_dir)
 
-    return index
+    return index, duplicates
 # end def
 
 def delete_duplicate_files(parent_dir: str, res_dir: str) -> str:
@@ -105,19 +130,27 @@ def delete_duplicate_files(parent_dir: str, res_dir: str) -> str:
     # end with
 # end def
 
-def main(log_level_name: str, disable_log_file: bool, log_dir: str, res_dir: str, delete_duplicates: bool):
+def main(
+    log_level_name: str, 
+    disable_log_file: bool, 
+    log_dir: str, 
+    res_dir: str, 
+    delete_duplicates: bool,
+    target_dir: str
+):
     # init logging
     logger.setLevel(logs.name_to_level(log_level_name))
 
     logs.init_logging(None if disable_log_file else log_dir)
 
     logger.debug(f'set log level to {log_level_name}[{logger.getEffectiveLevel()}]')
-
-    image_dir = '~/Pictures/family/ruby'
-    if not delete_duplicate_files:
-        find_duplicate_files(image_dir, res_dir)
+    
+    if not delete_duplicates:
+        find_duplicate_files(parent_dir=target_dir, res_dir=res_dir)
+    # end if find
     else:
-        delete_duplicate_files(image_dir, res_dir)
+        delete_duplicate_files(parent_dir=target_dir, res_dir=res_dir)
+    # end else delete
 # end def
 
 if __name__ == '__main__':
@@ -147,6 +180,10 @@ if __name__ == '__main__':
         '--delete-duplicates', '-D', action='store_true',
         help='delete duplicates determined from previous run'
     )
+    opt_parser.add_argument(
+        '--target-dir', '-t', default='target/',
+        help='specify target directory to manage'
+    )
 
     # parse args from argv, skipping program name
     opts = opt_parser.parse_args(sys.argv[1:])
@@ -156,6 +193,7 @@ if __name__ == '__main__':
         disable_log_file=getattr(opts, 'no_log_file'),
         log_dir=getattr(opts, 'log_dir'),
         res_dir=getattr(opts, 'res_dir'),
-        delete_duplicates=getattr(opts, 'delete_duplicates')
+        delete_duplicates=getattr(opts, 'delete_duplicates'),
+        target_dir=getattr(opts, 'target_dir')
     )
 # end if main
