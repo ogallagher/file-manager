@@ -14,7 +14,7 @@ class TestFileManager(TestCase):
     TARGET_DIR = os.path.join(RESOURCE_DIR, 'target')
 
     F_1 = 'one-two three_four (1).xyz'
-    """Original file"""
+    """Original text file"""
     F_2 = 'one-two three_four (2).xyz'
     """Full copy"""
     F_3 = 'one-two three_four (3).xyz'
@@ -24,13 +24,22 @@ class TestFileManager(TestCase):
     F_5 = 'one-two three_four (5).abc'
     """Different extension"""
 
+    I_1 = 'apple.png'
+    """Original apple image file."""
+    I_2 = 'apple (1).png'
+    """Full copy, parenthesis syntax."""
+    I_3 = 'apple copy.png'
+    """Full copy, macos syntax."""
+    I_4 = 'apple.jpg'
+    """Converted to jpeg format."""
+
     def setUpClass():
         logs.init_logging(logs_dir=os.path.join(TestFileManager.RESOURCE_DIR, 'logs'))
         TestFileManager.logger = logging.getLogger(TestFileManager.__name__)
         TestFileManager.logger.setLevel(logging.DEBUG)
     # end def
 
-    def test_file_name_to_id(self):
+    def test_file_name_to_id_text(self):
         prev_dir = os.getcwd()
         os.chdir(self.TARGET_DIR)
         self.logger.debug(f'test target dir = {os.getcwd()}')
@@ -52,6 +61,10 @@ class TestFileManager(TestCase):
         self.assertNotEqual(id_1, id_5, f'failed to distinguish {id_5} by file extension')
 
         os.chdir(prev_dir)
+    # end def
+
+    def test_file_name_to_id_image(self):
+        self.skipTest('not ready')
     # end def
 
     def test_find_duplicate_files_shallow(self):
@@ -85,6 +98,10 @@ class TestFileManager(TestCase):
     # end def
 
     def test_delete_duplicate_files_deep(self):
+        self.skipTest('not ready')
+    # end def
+
+    def test_image_metadata(self):
         self.skipTest('not ready')
     # end def
 # end class

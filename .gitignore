@@ -5,3 +5,4 @@ test/resources/logs/
 res/
 .venv/
 .vscode/
+**/.DS_Store

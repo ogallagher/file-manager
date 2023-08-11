@@ -45,6 +45,10 @@ def _index_file(index: Dict[str, List[str]], file_id: str, file_path: str):
         index[file_id] += file_path
 # end def
 
+def image_metadata(file_path: str):
+    raise NotImplementedError('cannot extract image data with exif yet')
+# end def
+
 def find_duplicate_files(parent_dir: str, res_dir: str, skip_file_write=False, recursive=False) -> Tuple[Dict, List[str]]:
     prev_dir = os.getcwd()
     logger.info(f'move from {prev_dir} to {parent_dir}')
@@ -182,8 +186,14 @@ def main(
 if __name__ == '__main__':
     opt_parser = ArgumentParser(
         prog='file manager',
-        description='bulk operations on the file system',
-        add_help=True
+        description='Bulk operations on the file system',
+        add_help=True,
+        usage="""Bulk operations on the file system. Supported functions:
+        - Create index of all files in a target directory.
+            - [pending] Include metadata for each file in the index.
+        - Delete logical duplicate files in a target directory. Requires having done the index function
+        in a previous run.
+        """
     )
 
     opt_parser.add_argument(
@@ -213,6 +223,10 @@ if __name__ == '__main__':
     opt_parser.add_argument(
         '--recursive', '-r', action='store_true',
         help='enter all child directories and include all files discovered'
+    )
+    opt_parser.add_argument(
+        '--exclude-metadata', action='store_true',
+        help='[pending] Exclude collection of metadata in the files index.'
     )
 
     # parse args from argv, skipping program name
