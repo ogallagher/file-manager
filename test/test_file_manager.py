@@ -10,8 +10,8 @@ import logs
 class TestFileManager(TestCase):
     logger: logging.Logger
 
-    RES_DIR = 'test/resources'
-    TARGET_DIR = os.path.join(RES_DIR, 'target')
+    RESOURCE_DIR = 'test/resources'
+    TARGET_DIR = os.path.join(RESOURCE_DIR, 'target')
 
     F_1 = 'one-two three_four (1).xyz'
     """Original file"""
@@ -25,7 +25,7 @@ class TestFileManager(TestCase):
     """Different extension"""
 
     def setUpClass():
-        logs.init_logging(logs_dir=os.path.join(TestFileManager.RES_DIR, 'logs'))
+        logs.init_logging(logs_dir=os.path.join(TestFileManager.RESOURCE_DIR, 'logs'))
         TestFileManager.logger = logging.getLogger(TestFileManager.__name__)
         TestFileManager.logger.setLevel(logging.DEBUG)
     # end def
@@ -71,7 +71,13 @@ class TestFileManager(TestCase):
     # end def
 
     def test_find_duplicate_files_deep(self):
-        self.skipTest('not ready')
+        index, duplicates = file_manager.find_duplicate_files(
+            parent_dir=self.TARGET_DIR,
+            res_dir=os.path.join(self.RESOURCE_DIR, 'res', 'find_duplicate_files_deep'),
+            skip_file_write=False,
+            recursive=True
+        )
+        self.skipTest('not done')
     # end def
 
     def test_delete_duplicate_files_shallow(self):

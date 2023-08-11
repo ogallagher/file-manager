@@ -34,6 +34,17 @@ def file_name_to_id(file_name) -> Optional[str]:
     # end else file
 # end def
 
+def _index_file(index: Dict[str, List[str]], file_id: str, file_path: str):
+    if file_id not in index:
+        index[file_id] = []
+    # end new name
+
+    if isinstance(file_path, str):
+        index[file_id].append(file_path)
+    else:
+        index[file_id] += file_path
+# end def
+
 def find_duplicate_files(parent_dir: str, res_dir: str, skip_file_write=False, recursive=False) -> Tuple[Dict, List[str]]:
     prev_dir = os.getcwd()
     logger.info(f'move from {prev_dir} to {parent_dir}')
@@ -48,17 +59,31 @@ def find_duplicate_files(parent_dir: str, res_dir: str, skip_file_write=False, r
 
         if file_id is None:
             if recursive:
-                logger.warning(f'{file_name}/ is a directory. recursive find duplicates not yet supported')
-                index[file_name] = {}
+                logger.info(f'find duplicates from {file_name}/')
+                sub_index, _ = find_duplicate_files(
+                    parent_dir=file_name,
+                    res_dir=res_dir,
+                    skip_file_write=True,
+                    recursive=True
+                )
+
+                # merge child index into parent
+                for sub_id, sub_file_names in sub_index.items():
+                    for sub_file_name in sub_file_names:
+                        sub_file_path = os.path.join(file_name, sub_file_name)
+                        _index_file(index, sub_id, file_path=sub_file_path)
+
+                        if len(index[sub_id]) > 1:
+                            duplicates.append(sub_file_path)
+                            logger.debug(f'found duplicate {sub_file_path} of {sub_id}')
+                        # end if duplicate
+                    # end for sub file
+                # end for sub id
             else:
                 logger.info(f'skip directory {file_name}/')
         # end if directory
         else:
-            if file_id not in index:
-                index[file_id] = []
-            # end new name
-
-            index[file_id].append(file_name)
+            _index_file(index, file_id, file_path=file_name)
 
             if len(index[file_id]) > 1:
                 duplicates.append(file_name)
