@@ -161,7 +161,8 @@ def main(
     log_dir: str, 
     res_dir: str, 
     delete_duplicates: bool,
-    target_dir: str
+    target_dir: str,
+    recursive: bool,
 ):
     # init logging
     logger.setLevel(logs.name_to_level(log_level_name))
@@ -171,7 +172,7 @@ def main(
     logger.debug(f'set log level to {log_level_name}[{logger.getEffectiveLevel()}]')
     
     if not delete_duplicates:
-        find_duplicate_files(parent_dir=target_dir, res_dir=res_dir)
+        find_duplicate_files(parent_dir=target_dir, res_dir=res_dir, recursive=recursive)
     # end if find
     else:
         delete_duplicate_files(parent_dir=target_dir, res_dir=res_dir)
@@ -209,6 +210,10 @@ if __name__ == '__main__':
         '--target-dir', '-t', default='target/',
         help='specify target directory to manage'
     )
+    opt_parser.add_argument(
+        '--recursive', '-r', action='store_true',
+        help='enter all child directories and include all files discovered'
+    )
 
     # parse args from argv, skipping program name
     opts = opt_parser.parse_args(sys.argv[1:])
@@ -219,6 +224,7 @@ if __name__ == '__main__':
         log_dir=getattr(opts, 'log_dir'),
         res_dir=getattr(opts, 'res_dir'),
         delete_duplicates=getattr(opts, 'delete_duplicates'),
-        target_dir=getattr(opts, 'target_dir')
+        target_dir=getattr(opts, 'target_dir'),
+        recursive=getattr(opts, 'recursive')
     )
 # end if main
