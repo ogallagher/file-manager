@@ -10,6 +10,8 @@ import os
 import json
 import re
 import exif
+import plum.exceptions
+import plum.bitfields
 
 FILE_META_DELIM = '//'
 
@@ -42,7 +44,13 @@ def _file_path_meta_str(file_path: str) -> str:
     if file_meta is None:
         return file_path
     else:
-        return f'{file_path}{FILE_META_DELIM}{json.dumps(file_meta)}'
+        try:
+            meta_str = json.dumps(file_meta)
+        except:
+            logger.warning(f'unable to json stringify {file_path} metadata {meta_str}')
+            meta_str = str(file_meta)
+
+        return f'{file_path}{FILE_META_DELIM}{meta_str}'
 # end def
 
 def _index_file(
@@ -67,6 +75,7 @@ def _index_file(
         ]
 # end def
 
+# TODO compare with PIL image metadata methods; getting a log of invalid TiffByteOrder errors
 def image_metadata(file_path: str) -> Optional[Dict]:
     try:
         with open(file_path, 'rb') as f:
@@ -77,15 +86,31 @@ def image_metadata(file_path: str) -> Optional[Dict]:
                 return None
             # end if not exif
             else:
-                return image.get_all()
+                metadata = image.get_all()
+
+                if isinstance(metadata, Dict):
+                    for key, val in metadata.items:
+                        if isinstance(val, plum.bitfields.BitFields):
+                            metadata[key] = val.asdict()
+                        # end if bitfields
+                        # else, hopefully json serializable
+                    # end for items
+                # end if dict
+
+                return metadata
             # end has exif
         # end with
     
     except IsADirectoryError:
         logger.debug(f'directory {file_path} is not an image')
         return None
+
+    except plum.exceptions.UnpackError as e:
+        logger.info(f'file {file_path} unable to parse EXIF metadata {e}')
+        return None
 # end def
 
+# TODO track progress and progressively write partial results
 def find_duplicate_files(
     parent_dir: str, 
     res_dir: str, 
@@ -101,7 +126,7 @@ def find_duplicate_files(
     """Maps file ids (unique per file prefix and size and type/extension) to names.
     """
     duplicates: List[str] = []
-    for file_name in os.listdir('.'):
+    for file_name in sorted(os.listdir('.')):
         file_id = file_name_to_id(file_name)
 
         if file_id is None:
@@ -188,7 +213,7 @@ def delete_duplicate_files(parent_dir: str, res_dir: str) -> str:
 
         for duplicate_name in duplicates:
             duplicate_path = os.path.join(os.path.expanduser(parent_dir), duplicate_name)
-            logger.debug(f'delete duplicate file {duplicate_path}')
+            logger.info(f'delete duplicate file {duplicate_path}')
             os.unlink(duplicate_path)
             deletes.append(duplicate_path + '\n')
         # end for
