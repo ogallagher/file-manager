@@ -9,6 +9,7 @@ import sys
 import os
 import json
 import re
+import exif
 
 logger = logging.getLogger('file-manager')
 
@@ -45,8 +46,19 @@ def _index_file(index: Dict[str, List[str]], file_id: str, file_path: str):
         index[file_id] += file_path
 # end def
 
-def image_metadata(file_path: str):
-    raise NotImplementedError('cannot extract image data with exif yet')
+def image_metadata(file_path: str) -> Optional[Dict]:
+    file_path_base, file_ext = os.path.split(file_path)
+    with open(file_path, 'rb') as f:
+        image = exif.Image(f)
+        
+        if not image.has_exif:
+            logger.debug(f'file {file_path} is not an image with EXIF metadata')
+            return None
+        # end if not exif
+        else:
+            return image.get_all()
+        # end has exif
+    # end with
 # end def
 
 def find_duplicate_files(parent_dir: str, res_dir: str, skip_file_write=False, recursive=False) -> Tuple[Dict, List[str]]:

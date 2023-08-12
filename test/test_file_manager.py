@@ -12,6 +12,7 @@ class TestFileManager(TestCase):
 
     RESOURCE_DIR = 'test/resources'
     TARGET_DIR = os.path.join(RESOURCE_DIR, 'target')
+    TARGET_IMG_DIR = os.path.join(TARGET_DIR, 'img')
 
     F_1 = 'one-two three_four (1).xyz'
     """Original text file"""
@@ -32,6 +33,8 @@ class TestFileManager(TestCase):
     """Full copy, macos syntax."""
     I_4 = 'apple.jpg'
     """Converted to jpeg format."""
+    I_5 = 'apple_meta.png'
+    """Apple image file with exif metadata attributes added."""
 
     def setUpClass():
         logs.init_logging(logs_dir=os.path.join(TestFileManager.RESOURCE_DIR, 'logs'))
@@ -102,6 +105,18 @@ class TestFileManager(TestCase):
     # end def
 
     def test_image_metadata(self):
-        self.skipTest('not ready')
+        # confirm exif supported image formats
+        png_metadata = file_manager.image_metadata(os.path.join(self.TARGET_IMG_DIR, self.I_5))
+        self.logger.info(f'{self.I_1} metadata = {png_metadata}')
+        self.assertIsNotNone(png_metadata)
+
+        jpg_metadata = file_manager.image_metadata(os.path.join(self.TARGET_IMG_DIR, self.I_4))
+        self.logger.info(f'{self.I_4} metadata = {jpg_metadata}')
+        self.assertIsNotNone(jpg_metadata)
+
+        # confirm other files correctly recognized as not supported
+        xyz_metadata = file_manager.image_metadata(os.path.join(self.TARGET_DIR, self.F_1))
+        self.logger.info(f'{self.F_1} unsupported image metadata = {xyz_metadata}')
+        self.assertIsNone(xyz_metadata)
     # end def
 # end class
