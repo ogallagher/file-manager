@@ -101,7 +101,7 @@ class TestFileManager(TestCase):
         for index_value in index.values():
             index_values += index_value
 
-        self.assertEqual(duplicates[0], self.F_2)
+        self.assertEqual(duplicates[0], self.F_6)
         for file_name in [self.F_1, self.F_2, self.F_3, self.F_4, self.F_5]:
             self.assertIn(file_name, index_values)
     # end def
@@ -143,7 +143,7 @@ class TestFileManager(TestCase):
         # confirm is a directory error
         self.assertIsNone(file_manager.image_metadata(self.TARGET_DIR))
 
-        # TiffByteOrder ValueError
+        # TiffByteOrder ValueError, switch library from exif to pillow
         png_2315_metadata_exif = file_manager.image_metadata(
             os.path.join(self.TARGET_IMG_DIR, self.I_6), 
             image_lib='exif',

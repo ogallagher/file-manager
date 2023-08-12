@@ -41,14 +41,14 @@ def file_name_to_id(file_name) -> Optional[str]:
 # end def
 
 def _file_path_meta_str(file_path: str) -> str:
-    file_meta = image_metadata(file_path=file_path)
+    file_meta = image_metadata(file_path=file_path, image_lib=PIL.__name__)
     if file_meta is None:
         return file_path
     else:
         try:
             meta_str = json.dumps(file_meta)
         except:
-            logger.warning(f'unable to json stringify {file_path} metadata {meta_str}')
+            logger.warning(f'unable to json stringify {file_path} metadata {file_meta}')
             meta_str = str(file_meta)
 
         return f'{file_path}{FILE_META_DELIM}{meta_str}'
@@ -76,7 +76,6 @@ def _index_file(
         ]
 # end def
 
-# TODO compare with PIL image metadata methods; getting a log of invalid TiffByteOrder errors
 def image_metadata(file_path: str, image_lib: str = exif.__name__, attempt: int = 0) -> Optional[Dict]:
     try:
         metadata: Dict = {}
@@ -123,6 +122,11 @@ def image_metadata(file_path: str, image_lib: str = exif.__name__, attempt: int 
         logger.debug(f'directory {file_path} is not an image')
         return None
     # end directory error
+
+    except PIL.UnidentifiedImageError as e:
+        logger.info(f'file {file_path} is not an image {e}')
+        return None
+    # end pillow format error
 
     except plum.exceptions.UnpackError as e:
         logger.info(f'file {file_path} unable to parse EXIF metadata {e}')
