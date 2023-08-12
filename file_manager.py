@@ -11,6 +11,8 @@ import json
 import re
 import exif
 
+FILE_META_DELIM = '//'
+
 logger = logging.getLogger('file-manager')
 
 # file name pattern "name (\d+).<ext>" is not enough to uniquely identify a file! We need to use contents
@@ -27,7 +29,7 @@ def file_name_to_id(file_name) -> Optional[str]:
         full_name, ext = os.path.splitext(file_name)
         name_parts = [
             part 
-            for part in re.split(r'\s+\((\d+)\)', full_name)
+            for part in re.split(r'\s+(?:\((\d+)\))|(?:copy\s?(\d*))\.', full_name)
             if part != ''
         ]
 
@@ -35,33 +37,62 @@ def file_name_to_id(file_name) -> Optional[str]:
     # end else file
 # end def
 
-def _index_file(index: Dict[str, List[str]], file_id: str, file_path: str):
+def _file_path_meta_str(file_path: str) -> str:
+    file_meta = image_metadata(file_path=file_path)
+    if file_meta is None:
+        return file_path
+    else:
+        return f'{file_path}{FILE_META_DELIM}{json.dumps(file_meta)}'
+# end def
+
+def _index_file(
+    index: Dict[str, List[str]], 
+    file_id: str, 
+    file_path: str, 
+    exclude_metadata: bool
+):
     if file_id not in index:
         index[file_id] = []
     # end new name
 
     if isinstance(file_path, str):
-        index[file_id].append(file_path)
+        if exclude_metadata:
+            index[file_id].append(file_path)
+        else:
+            index[file_id].append(_file_path_meta_str(file_path=file_path))
     else:
-        index[file_id] += file_path
+        index[file_id] += [
+            _file_path_meta_str(file_path=child_path)
+            for child_path in file_path
+        ]
 # end def
 
 def image_metadata(file_path: str) -> Optional[Dict]:
-    file_path_base, file_ext = os.path.split(file_path)
-    with open(file_path, 'rb') as f:
-        image = exif.Image(f)
-        
-        if not image.has_exif:
-            logger.debug(f'file {file_path} is not an image with EXIF metadata')
-            return None
-        # end if not exif
-        else:
-            return image.get_all()
-        # end has exif
-    # end with
+    try:
+        with open(file_path, 'rb') as f:
+            image = exif.Image(f)
+            
+            if not image.has_exif:
+                logger.debug(f'file {file_path} is not an image with EXIF metadata')
+                return None
+            # end if not exif
+            else:
+                return image.get_all()
+            # end has exif
+        # end with
+    
+    except IsADirectoryError:
+        logger.debug(f'directory {file_path} is not an image')
+        return None
 # end def
 
-def find_duplicate_files(parent_dir: str, res_dir: str, skip_file_write=False, recursive=False) -> Tuple[Dict, List[str]]:
+def find_duplicate_files(
+    parent_dir: str, 
+    res_dir: str, 
+    skip_file_write=False, 
+    recursive=False,
+    exclude_metadata=False
+) -> Tuple[Dict, List[str]]:
     prev_dir = os.getcwd()
     logger.info(f'move from {prev_dir} to {parent_dir}')
     os.chdir(os.path.expanduser(parent_dir))
@@ -80,14 +111,18 @@ def find_duplicate_files(parent_dir: str, res_dir: str, skip_file_write=False, r
                     parent_dir=file_name,
                     res_dir=res_dir,
                     skip_file_write=True,
-                    recursive=True
+                    recursive=True,
+                    exclude_metadata=exclude_metadata
                 )
 
                 # merge child index into parent
                 for sub_id, sub_file_names in sub_index.items():
                     for sub_file_name in sub_file_names:
-                        sub_file_path = os.path.join(file_name, sub_file_name)
-                        _index_file(index, sub_id, file_path=sub_file_path)
+                        if FILE_META_DELIM in sub_file_name:
+                            sub_file_path = os.path.join(file_name, sub_file_name[:sub_file_name.index(FILE_META_DELIM)])
+                        else:
+                            sub_file_path = os.path.join(file_name, sub_file_name)
+                        _index_file(index, sub_id, file_path=sub_file_path, exclude_metadata=exclude_metadata)
 
                         if len(index[sub_id]) > 1:
                             duplicates.append(sub_file_path)
@@ -99,7 +134,7 @@ def find_duplicate_files(parent_dir: str, res_dir: str, skip_file_write=False, r
                 logger.info(f'skip directory {file_name}/')
         # end if directory
         else:
-            _index_file(index, file_id, file_path=file_name)
+            _index_file(index, file_id, file_path=file_name, exclude_metadata=exclude_metadata)
 
             if len(index[file_id]) > 1:
                 duplicates.append(file_name)
@@ -179,6 +214,7 @@ def main(
     delete_duplicates: bool,
     target_dir: str,
     recursive: bool,
+    exclude_metadata: bool
 ):
     # init logging
     logger.setLevel(logs.name_to_level(log_level_name))
@@ -188,7 +224,12 @@ def main(
     logger.debug(f'set log level to {log_level_name}[{logger.getEffectiveLevel()}]')
     
     if not delete_duplicates:
-        find_duplicate_files(parent_dir=target_dir, res_dir=res_dir, recursive=recursive)
+        find_duplicate_files(
+            parent_dir=target_dir, 
+            res_dir=res_dir, 
+            recursive=recursive,
+            exclude_metadata=exclude_metadata
+        )
     # end if find
     else:
         delete_duplicate_files(parent_dir=target_dir, res_dir=res_dir)
@@ -238,7 +279,7 @@ if __name__ == '__main__':
     )
     opt_parser.add_argument(
         '--exclude-metadata', action='store_true',
-        help='[pending] Exclude collection of metadata in the files index.'
+        help='Exclude collection of metadata in the files index.'
     )
 
     # parse args from argv, skipping program name
@@ -251,6 +292,7 @@ if __name__ == '__main__':
         res_dir=getattr(opts, 'res_dir'),
         delete_duplicates=getattr(opts, 'delete_duplicates'),
         target_dir=getattr(opts, 'target_dir'),
-        recursive=getattr(opts, 'recursive')
+        recursive=getattr(opts, 'recursive'),
+        exclude_metadata=getattr(opts, 'exclude_metadata')
     )
 # end if main
