@@ -243,7 +243,7 @@ if __name__ == '__main__':
         add_help=True,
         usage="""Bulk operations on the file system. Supported functions:
         - Create index of all files in a target directory.
-            - [pending] Include metadata for each file in the index.
+            - Include metadata for each file in the index.
         - Delete logical duplicate files in a target directory. Requires having done the index function
         in a previous run.
         """
