@@ -10,6 +10,7 @@ import os
 import json
 import re
 import exif
+import PIL, PIL.Image, PIL.ExifTags
 import plum.exceptions
 import plum.bitfields
 
@@ -76,38 +77,66 @@ def _index_file(
 # end def
 
 # TODO compare with PIL image metadata methods; getting a log of invalid TiffByteOrder errors
-def image_metadata(file_path: str) -> Optional[Dict]:
+def image_metadata(file_path: str, image_lib: str = exif.__name__, attempt: int = 0) -> Optional[Dict]:
     try:
-        with open(file_path, 'rb') as f:
-            image = exif.Image(f)
-            
+        metadata: Dict = {}
+
+        if image_lib == exif.__name__:
+            with open(file_path, 'rb') as f:
+                image: exif.Image = exif.Image(f)
+            # end with
+
             if not image.has_exif:
                 logger.debug(f'file {file_path} is not an image with EXIF metadata')
                 return None
             # end if not exif
-            else:
-                metadata = image.get_all()
 
-                if isinstance(metadata, Dict):
-                    for key, val in metadata.items:
-                        if isinstance(val, plum.bitfields.BitFields):
-                            metadata[key] = val.asdict()
-                        # end if bitfields
-                        # else, hopefully json serializable
-                    # end for items
-                # end if dict
+            metadata = image.get_all()
 
-                return metadata
-            # end has exif
-        # end with
+            if isinstance(metadata, Dict):
+                for key, val in metadata.items():
+                    if isinstance(val, plum.bitfields.BitFields):
+                        metadata[key] = val.asdict()
+                    # end if bitfields
+                    # else, hopefully json serializable
+                # end for items
+            # end if dict
+        # end exif
+
+        elif image_lib == PIL.__name__:
+            image: PIL.Image.Image = PIL.Image.open(file_path)
+            image_exif: PIL.Image.Exif = image.getexif()
+
+            for exif_id, val in image_exif.items():
+                metadata[PIL.ExifTags.TAGS[exif_id]] = val
+            # end for exif items
+        # end PIL
+
+        else:
+            raise NotImplementedError(f'cannot parse image metadata with library {image_lib}')
+        # end library unknown
+
+        return metadata
+    # end try
     
     except IsADirectoryError:
         logger.debug(f'directory {file_path} is not an image')
         return None
+    # end directory error
 
     except plum.exceptions.UnpackError as e:
         logger.info(f'file {file_path} unable to parse EXIF metadata {e}')
-        return None
+
+        if attempt < 1:
+            logger.info('retry metadata parse with pillow')
+            return image_metadata(
+                file_path=file_path,
+                image_lib=PIL.__name__,
+                attempt=(attempt + 1)
+            )
+        else:
+            return None
+    # end exif unpack error
 # end def
 
 # TODO track progress and progressively write partial results

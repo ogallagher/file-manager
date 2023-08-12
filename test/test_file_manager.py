@@ -39,11 +39,16 @@ class TestFileManager(TestCase):
     """Converted to jpeg format."""
     I_5 = 'apple_meta.png'
     """Apple image file with exif metadata attributes added."""
+    I_6 = 'IMG_2315.png'
+    """Black dog by window and Ticket to Ride board game.
+    Causes TiffByteOrder ValueError for exif library metadata parsing.
+    """
 
     def setUpClass():
         logs.init_logging(logs_dir=os.path.join(TestFileManager.RESOURCE_DIR, 'logs'))
         TestFileManager.logger = logging.getLogger(TestFileManager.__name__)
         TestFileManager.logger.setLevel(logging.DEBUG)
+        file_manager.logger.setLevel(logging.DEBUG)
     # end def
 
     def test_file_name_to_id_text(self):
@@ -137,5 +142,25 @@ class TestFileManager(TestCase):
 
         # confirm is a directory error
         self.assertIsNone(file_manager.image_metadata(self.TARGET_DIR))
+
+        # TiffByteOrder ValueError
+        png_2315_metadata_exif = file_manager.image_metadata(
+            os.path.join(self.TARGET_IMG_DIR, self.I_6), 
+            image_lib='exif',
+            attempt=1
+        )
+        self.logger.info(f'{self.I_6} exif metadata with exif lib = {png_2315_metadata_exif}')
+
+        png_2315_metadata_pil = file_manager.image_metadata(
+            os.path.join(self.TARGET_IMG_DIR, self.I_6),
+            image_lib='PIL',
+            attempt=1
+        )
+        self.logger.info(f'{self.I_6} exif metadata with PIL lib = {png_2315_metadata_pil}')
+
+        self.assertTrue(
+            png_2315_metadata_pil is not None if png_2315_metadata_exif is None 
+            else png_2315_metadata_exif is not None
+        )
     # end def
 # end class
