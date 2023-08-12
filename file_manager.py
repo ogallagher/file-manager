@@ -10,9 +10,10 @@ import os
 import json
 import re
 import exif
-import PIL, PIL.Image, PIL.ExifTags
+import PIL, PIL.Image, PIL.ExifTags, PIL.TiffImagePlugin
 import plum.exceptions
 import plum.bitfields
+from datetime import datetime
 
 FILE_META_DELIM = '//'
 
@@ -107,6 +108,14 @@ def image_metadata(file_path: str, image_lib: str = exif.__name__, attempt: int 
             image_exif: PIL.Image.Exif = image.getexif()
 
             for exif_id, val in image_exif.items():
+                if isinstance(val, datetime):
+                    val = val.isoformat(sep=' ')
+                
+                elif isinstance(val, PIL.TiffImagePlugin.IFDRational):
+                    val = float(val)
+                
+                logger.debug(f'meta {PIL.ExifTags.TAGS[exif_id]} = {val}{type(val)}')
+
                 metadata[PIL.ExifTags.TAGS[exif_id]] = val
             # end for exif items
         # end PIL
@@ -149,7 +158,8 @@ def find_duplicate_files(
     res_dir: str, 
     skip_file_write=False, 
     recursive=False,
-    exclude_metadata=False
+    exclude_metadata=False,
+    skip_dot_underscore_macos_prefix=True
 ) -> Tuple[Dict, List[str]]:
     prev_dir = os.getcwd()
     logger.info(f'move from {prev_dir} to {parent_dir}')
@@ -160,6 +170,18 @@ def find_duplicate_files(
     """
     duplicates: List[str] = []
     for file_name in sorted(os.listdir('.')):
+        if file_name.startswith('./'):
+            logger.debug(f'skip redundant file listing {file_name}')
+            continue
+        # end if includes current dir in name
+        elif skip_dot_underscore_macos_prefix and file_name.startswith('._'):
+            logger.debug(f'skip macos meta file {file_name}')
+            continue
+        # end if macos metadata file
+        else:
+            logger.debug(f'do not skip {file_name}')
+        # end no skip
+        
         file_id = file_name_to_id(file_name)
 
         if file_id is None:
