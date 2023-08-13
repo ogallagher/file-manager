@@ -1,3 +1,4 @@
 pytest
 exif
 Pillow
+progressbar2

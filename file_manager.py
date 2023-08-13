@@ -14,6 +14,7 @@ import PIL, PIL.Image, PIL.ExifTags, PIL.TiffImagePlugin
 import plum.exceptions
 import plum.bitfields
 from datetime import datetime
+import progressbar
 
 FILE_META_DELIM = '//'
 
@@ -169,7 +170,9 @@ def find_duplicate_files(
     """Maps file ids (unique per file prefix and size and type/extension) to names.
     """
     duplicates: List[str] = []
-    for file_name in sorted(os.listdir('.')):
+
+    progress_bar = progressbar.ProgressBar()
+    for file_name in progress_bar(sorted(os.listdir('.'))):
         if file_name.startswith('./'):
             logger.debug(f'skip redundant file listing {file_name}')
             continue
@@ -266,7 +269,8 @@ def delete_duplicate_files(parent_dir: str, res_dir: str) -> str:
         duplicates = [re.split(r'[\n\r]+$', line)[0] for line in f.readlines()]
         logger.info(f'deleting {len(duplicates)} listed in {duplicates_file}')
 
-        for duplicate_name in duplicates:
+        progress_bar = progressbar.ProgressBar()
+        for duplicate_name in progress_bar(duplicates):
             duplicate_path = os.path.join(os.path.expanduser(parent_dir), duplicate_name)
             logger.info(f'delete duplicate file {duplicate_path}')
             os.unlink(duplicate_path)
