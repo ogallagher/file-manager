@@ -153,7 +153,6 @@ def image_metadata(file_path: str, image_lib: str = exif.__name__, attempt: int 
     # end exif unpack error
 # end def
 
-# TODO track progress and progressively write partial results
 def find_duplicate_files(
     parent_dir: str, 
     res_dir: str, 

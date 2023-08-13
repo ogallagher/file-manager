@@ -1,0 +1,20 @@
+{
+  "name": "face-manager",
+  "version": "0.1.0",
+  "description": "Facebook integration for file-manager.",
+  "main": "face_manager.js",
+  "scripts": {
+    "test": "mocha test"
+  },
+  "keywords": [
+    "facebook-api",
+    "photos",
+    "albums",
+    "images"
+  ],
+  "author": "Owen Gallagher <github.com/ogallagher>",
+  "license": "see LICENSE",
+  "dependencies": {
+    "fb-sdk-wrapper": "^1.1.0"
+  }
+}
