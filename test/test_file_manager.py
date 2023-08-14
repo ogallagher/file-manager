@@ -37,8 +37,6 @@ class TestFileManager(TestCase):
     """Full copy, macos syntax."""
     I_4 = 'apple.jpg'
     """Converted to jpeg format."""
-    I_5 = 'apple_meta.png'
-    """Apple image file with exif metadata attributes added."""
     I_6 = 'IMG_2315.png'
     """Black dog by window and Ticket to Ride board game.
     Causes TiffByteOrder ValueError for exif library metadata parsing.
@@ -127,7 +125,7 @@ class TestFileManager(TestCase):
 
     def test_image_metadata(self):
         # confirm exif supported image formats
-        png_metadata = file_manager.image_metadata(os.path.join(self.TARGET_IMG_DIR, self.I_5))
+        png_metadata = file_manager.image_metadata(os.path.join(self.TARGET_IMG_DIR, self.I_1))
         self.logger.info(f'{self.I_1} metadata = {png_metadata}')
         self.assertIsNotNone(png_metadata)
 

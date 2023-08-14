@@ -89,7 +89,7 @@ def image_metadata(file_path: str, image_lib: str = exif.__name__, attempt: int 
 
             if not image.has_exif:
                 logger.debug(f'file {file_path} is not an image with EXIF metadata')
-                return None
+                raise plum.exceptions.UnpackError(f'{file_path} has no metadata according to {image_lib}')
             # end if not exif
 
             metadata = image.get_all()
