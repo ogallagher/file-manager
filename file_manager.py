@@ -15,6 +15,7 @@ import plum.exceptions
 import plum.bitfields
 from datetime import datetime
 import progressbar
+import asyncio
 
 FILE_META_DELIM = '//'
 
@@ -289,15 +290,27 @@ def delete_duplicate_files(parent_dir: str, res_dir: str) -> str:
     # end with
 # end def
 
-def main(
+def upload_files(parent_dir: str, res_dir: str):
+    face_manager_process = asyncio.create_subprocess_exec(
+        'node',
+        'face_manager.mjs',
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+        cwd='face-manager'
+    )
+
+    return face_manager_process
+# end def
+
+async def main(
     log_level_name: str, 
     disable_log_file: bool, 
     log_dir: str, 
-    res_dir: str, 
-    delete_duplicates: bool,
+    res_dir: str,
     target_dir: str,
     recursive: bool,
-    exclude_metadata: bool
+    exclude_metadata: bool,
+    action: str
 ):
     # init logging
     logger.setLevel(logs.name_to_level(log_level_name))
@@ -306,17 +319,32 @@ def main(
 
     logger.debug(f'set log level to {log_level_name}[{logger.getEffectiveLevel()}]')
     
-    if not delete_duplicates:
+    if action == 'index':
         find_duplicate_files(
             parent_dir=target_dir, 
             res_dir=res_dir, 
             recursive=recursive,
             exclude_metadata=exclude_metadata
         )
-    # end if find
-    else:
+    # end if index
+    elif action == 'upload':
+        try:
+            try:
+                upload_process = await upload_files(
+                    parent_dir=target_dir,
+                    res_dir=res_dir
+                )
+                input('any key to quit/pause upload process\n')
+                upload_process.kill()
+            except KeyboardInterrupt:
+                upload_process.kill()
+        except asyncio.exceptions.CancelledError:
+            logger.info('quit facebook upload child process')
+
+    elif action == 'dedupe':
         delete_duplicate_files(parent_dir=target_dir, res_dir=res_dir)
-    # end else delete
+    else:
+        raise NotImplementedError(f'action {action} not supported')
 # end def
 
 if __name__ == '__main__':
@@ -349,10 +377,6 @@ if __name__ == '__main__':
         help='results directory'
     )
     opt_parser.add_argument(
-        '--delete-duplicates', '-D', action='store_true',
-        help='delete duplicates determined from previous run'
-    )
-    opt_parser.add_argument(
         '--target-dir', '-t', default='target/',
         help='specify target directory to manage'
     )
@@ -364,18 +388,23 @@ if __name__ == '__main__':
         '--exclude-metadata', action='store_true',
         help='Exclude collection of metadata in the files index.'
     )
+    opt_parser.add_argument(
+        '--action', '-a', type=str, default='index',
+        choices=['index', 'dedupe', 'upload'],
+        help='select action to perform'
+    )
 
     # parse args from argv, skipping program name
     opts = opt_parser.parse_args(sys.argv[1:])
 
-    main(
+    asyncio.run(main(
         log_level_name=getattr(opts, 'log_level'),
         disable_log_file=getattr(opts, 'no_log_file'),
         log_dir=getattr(opts, 'log_dir'),
         res_dir=getattr(opts, 'res_dir'),
-        delete_duplicates=getattr(opts, 'delete_duplicates'),
         target_dir=getattr(opts, 'target_dir'),
         recursive=getattr(opts, 'recursive'),
-        exclude_metadata=getattr(opts, 'exclude_metadata')
-    )
+        exclude_metadata=getattr(opts, 'exclude_metadata'),
+        action=getattr(opts, 'action')
+    ))
 # end if main
