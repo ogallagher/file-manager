@@ -21,6 +21,10 @@ FILE_META_DELIM = '//'
 
 logger = logging.getLogger('file-manager')
 
+def path_to_name(path: str) -> str:
+    return path.replace('/', '_')
+# end def
+
 # file name pattern "name (\d+).<ext>" is not enough to uniquely identify a file! We need to use contents
 def file_name_to_id(file_name) -> Optional[str]:
     stat = os.stat(file_name)
@@ -227,7 +231,7 @@ def find_duplicate_files(
     # end for
 
     if not skip_file_write:
-        index_dir = os.path.join(prev_dir, res_dir, parent_dir.replace('/', '_'))
+        index_dir = os.path.join(prev_dir, res_dir, path_to_name(parent_dir))
         os.makedirs(index_dir, exist_ok=True)
 
         index_file = os.path.join(index_dir, 'index.json')
@@ -261,7 +265,7 @@ def find_duplicate_files(
 # end def
 
 def delete_duplicate_files(parent_dir: str, res_dir: str) -> str:
-    duplicates_dir = os.path.join(res_dir, parent_dir.replace('/', '_'))
+    duplicates_dir = os.path.join(res_dir, path_to_name(parent_dir))
     duplicates_file = os.path.join(duplicates_dir, 'duplicates.txt')
 
     deletes = []
@@ -294,6 +298,10 @@ def upload_files(parent_dir: str, res_dir: str):
     face_manager_process = asyncio.create_subprocess_exec(
         'node',
         'face_manager.mjs',
+        '--target-dir',
+        os.path.join('..', parent_dir),
+        '--index-file',
+        os.path.join('..', res_dir, path_to_name(parent_dir), 'index.json'),
         stdout=sys.stdout,
         stderr=sys.stderr,
         cwd='face-manager'

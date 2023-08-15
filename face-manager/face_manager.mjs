@@ -3,6 +3,7 @@ import pino from 'pino'
 import { fileURLToPath } from 'node:url'
 import * as fs from 'node:fs/promises'
 import express from 'express'
+import https from 'https'
 import cors from 'cors'
 import path from 'node:path'
 import yargs from 'yargs'
@@ -106,11 +107,16 @@ server.get(URL_PATH_NEXT_PHOTO_UPLOAD, function(req, res) {
              *  caption: string
              * }}
              */
-            let next_upload = {}
+            let next_upload = {
+                album_id: null,
+                photo_id: null,
+                caption: null
+            }
 
             if (last_upload !== undefined) {
                 logger.info(`last upload was ${JSON.stringify(last_upload)}`)
-                next_upload = last_upload.index_idx + 1
+                next_upload.index_idx = last_upload.index_idx + 1
+                next_upload.album_id = last_upload.album_id
             }
             else {
                 logger.info('last upload not found; assume next upload is first in index')
@@ -152,10 +158,29 @@ server.get(URL_PATH_PHOTO_CONTENT, function(req, res) {
     res.sendFile(abs_path)
 })
 
-server.listen(process.env.SERVER_PORT, () => {
-    logger.info(
-        `deployed face-manager at localhost:${process.env.SERVER_PORT}, serving local dir ${SERVER_DIR}`
+Promise.all([
+    /*
+    create self signed cert and private key:
+    openssl genrsa -out server.key 2048
+    openssl rsa -in server.key -out server.key
+    openssl req -sha256 -new -key server.key -out server.csr -subj '/CN=localhost'
+    openssl x509 -req -sha256 -days 365 -in server.csr -signkey server.key -out server.crt
+    cat server.crt server.key > cert.pem
+    */
+    fs.readFile('secret/https/server.key'),
+    fs.readFile('secret/https/cert.pem')
+])
+.then((key_cert) => {
+    let server_https = https.createServer(
+        {
+            key: key_cert[0],
+            cert: key_cert[1]
+        },
+        server
     )
+    server_https.listen(443, () => {
+        logger.info(`deployed face-manager at localhost, serving local dir ${SERVER_DIR}`)
+    })
 })
 
 /**

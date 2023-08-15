@@ -1,17 +1,34 @@
+const FACE_RES_KEY_ERROR = 'error'
+const FACE_RES_KEY_DATA = 'data'
+
+/**
+ * @type {{
+ *  init: Function,
+ *  api: Function,
+ *  getLoginStatus: Function
+ * }}
+ */
+let facebook
+
+/**
+ * @type {string}
+ */
+let api_token
+/**
+ * @type {Date}
+ */
+let api_token_expiry
+
+window.addEventListener('load', () => {
+    const temp_logger_console = document.getElementsByClassName(TempLogger.CMP_CONSOLE_CLASS)[0]
+    temp_logger_console.classList.remove('fixed-top')
+    temp_logger_console.remove()
+    document.getElementById('console-container').appendChild(temp_logger_console)
+})
+
 // facebook will call this method when ready
 window.fbAsyncInit = function() {
-    http_get('/facebook-app-id')
-    .then((facebook_app_id_str) => {
-        let facebook_app_id = JSON.parse(facebook_app_id_str)['value']
-        console.log(`info facebook-app-id=${facebook_app_id}`)
-
-        FB.init({
-            appId            : facebook_app_id,
-            autoLogAppEvents : true,
-            xfbml            : true,
-            version          : 'v17.0'
-        })
-    })
+    facebook = FB
 
     init_logging()
     .then(
@@ -22,31 +39,214 @@ window.fbAsyncInit = function() {
             console.log(`error logging failure ${err.stack}`)
         }
     )
-    .finally(() => {
-        main(FB)
+    .then(() => {
+        return http_get('/facebook-app-id')
     })
+    .then((facebook_app_id_str) => {
+        let facebook_app_id = JSON.parse(facebook_app_id_str)['value']
+        console.log(`info facebook-app-id=${facebook_app_id}`)
+
+        facebook.init({
+            appId            : facebook_app_id,
+            autoLogAppEvents : true,
+            xfbml            : true,
+            version          : 'v17.0'
+        })
+
+        console.log('info facebook api sdk ready')
+    })
+    .then(main)
+}
+
+function main() {
+    // fetch next photo upload request
+    http_get('/next-album-photo')
+    .then((upload_str) => {
+        /**
+         * @type {{
+         *  local_path: string,
+         *  index_idx: number,
+         *  exif_meta: Object,
+         *  album_id: string,
+         *  photo_id: string,
+         *  caption: string
+         * }}
+         */
+        let upload = JSON.parse(upload_str)
+
+        if (upload.error !== undefined) {
+            console.log(`error unable to fetch next photo upload ${upload.error}`)
+            return null
+        }
+        else {
+            console.log(`info next upload = ${JSON.stringify(upload)}`)
+            return upload
+        }
+    })
+    // select album
+    .then((upload) => {
+        return new Promise(function(res) {
+            if (upload !== null) {
+                if (upload.album_id === null) {
+                    console.log(`info upload request does not select an album; pick one`)
+    
+                    fetch_albums()
+                    .then(select_album)
+                    .then((album_id) => {
+                        upload.album_id = album_id
+                        res(upload)
+                    })
+                }
+                else {
+                    console.log(`debug upload ${upload.local_path} to album ${upload.album_id}`)
+                    res(upload)
+                }
+            }
+            else {
+                rej(new Error(`error unable to perform photo uploads without local path(s)`))
+            }
+        })
+    })
+    // perform upload
+    .then(
+        do_upload,
+        (err) => {
+            console.log(`error cannot perform upload ${err.stack}`)
+        }
+    )
+}
+
+/**
+ * @param {{
+ *  local_path: string,
+ *  index_idx: number,
+ *  exif_meta: Object,
+ *  album_id: string,
+ *  photo_id: string,
+ *  caption: string
+ * }} upload
+ * 
+ * @returns {boolean}
+ */
+function do_upload(upload) {
+    console.log(`info perform upload ${JSON.stringify(upload)}`)
 }
 
 /**
  * 
  * @param {{
- *  init: Function
- * }} facebook 
+ *  id: string,
+ *  description: string,
+ *  count: number,
+ *  can_upload: boolean,
+ *  name: string
+ * }[]} albums 
+ * @returns {string}
  */
-function main(facebook) {
-    console.log(`info facebook api sdk ready: ${facebook}`)
-
-    // fetch next photo upload request
-    http_get('/next-album-photo')
-    .then((upload_str) => {
-        let upload = JSON.parse(upload_str)
-
-        if (upload.error !== undefined) {
-            console.log(`error unable to fetch next photo upload ${upload.error}`)
+function select_album(albums) {
+    return new Promise(function(res) {
+        console.log(`info available albums: ${JSON.stringify(albums)}`)
+        const parent = document.getElementById('album-select')
+        parent.innerHTML = ''
+        for (let album of albums) {
+            const album_el = document.createElement('div')
+            album_el.classList.add('col-auto')
+            album_el.innerHTML = (
+                `<button 
+                    class="btn btn-outline-dark" 
+                    data-album-id="${album.id}" data-album-can-upload="${album.can_upload}"
+                    ${album.can_upload ? '' : 'disabled'}>
+                    <span class="h3">${album.name}</span><br>
+                    <span>${album.description || '&lt;no description&gt;'}</span><br>
+                    <span>photos count = ${album.count}</span>
+                </button>`
+            )
+            album_el.onclick = function() {
+                console.log(`info selected album ${album.name}`)
+                parent.innerHTML = ''
+                res(album.id)
+            }
+            parent.appendChild(album_el)
         }
-        else {
-            console.log(`info next upload = ${JSON.stringify(upload)}`)
+    })
+}
+
+/**
+ * 
+ * @returns {Promise<{
+ *  id: string,
+ *  description: string,
+ *  count: number,
+ *  can_upload: boolean,
+ *  name: string
+ * }[]>}
+ */
+function fetch_albums() {
+    return refresh_api_login()
+    .then(() => {
+        return new Promise(function(res, rej) {
+            facebook.api(
+                '/me/albums',
+                'GET',
+                {
+                    fields: 'id,description,count,can_upload,name'
+                },
+                function(api_res) {
+                    if (api_res[FACE_RES_KEY_ERROR] !== undefined) {
+                        rej(api_res[FACE_RES_KEY_ERROR])
+                    }
+                    else {
+                        res(api_res[FACE_RES_KEY_DATA])
+                    }
+                }
+            )
+        })
+    })
+}
+
+function refresh_api_login() {
+    return new Promise(function(res, rej) {
+        /**
+         * 
+         * @param {{
+         *  status: string,
+         *  authResponse: {
+         *      accessToken: string,
+         *      expiresIn: string,
+         *      reauthorize_required_in: string,
+         *      userID: string
+         *  }
+         * }} login_status 
+         */
+        function handle_login(login_status, renew = true) {
+            let now = new Date()
+            console.log(`debug facebook login status = ${login_status.status}`)
+    
+            if (login_status.status === 'connected') {
+                api_token = login_status.accessToken
+                api_token_expiry = now
+                api_token_expiry.setSeconds(api_token_expiry.getSeconds() + login_status.reauthorize_required_in)
+                res(api_token)
+            }
+            else if (renew) {
+                console.log('info need new facebook api token; logging in')
+
+                facebook.login(
+                    (login) => {
+                        // only try login once
+                        handle_login(login, false)
+                    },
+                    {
+                        scope: 'public_profile,user_photos'
+                    }
+                )
+            }
+            else {
+                rej(login_status)
+            }
         }
+
+        facebook.getLoginStatus(handle_login)
     })
 }
 
