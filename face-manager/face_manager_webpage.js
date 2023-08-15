@@ -9,7 +9,7 @@ const FACE_RES_KEY_DATA = 'data'
  * }}
  */
 let facebook
-
+let facebook_app_id
 /**
  * @type {string}
  */
@@ -43,7 +43,7 @@ window.fbAsyncInit = function() {
         return http_get('/facebook-app-id')
     })
     .then((facebook_app_id_str) => {
-        let facebook_app_id = JSON.parse(facebook_app_id_str)['value']
+        facebook_app_id = JSON.parse(facebook_app_id_str)['value']
         console.log(`info facebook-app-id=${facebook_app_id}`)
 
         facebook.init({
@@ -66,6 +66,8 @@ function main() {
          * @type {{
          *  local_path: string,
          *  index_idx: number,
+         *  mime_type: string,
+         *  file_size: number,
          *  exif_meta: Object,
          *  album_id: string,
          *  photo_id: string,
@@ -120,6 +122,8 @@ function main() {
  * @param {{
  *  local_path: string,
  *  index_idx: number,
+ *  mime_type: string,
+ *  file_size: number,
  *  exif_meta: Object,
  *  album_id: string,
  *  photo_id: string,
@@ -130,6 +134,88 @@ function main() {
  */
 function do_upload(upload) {
     console.log(`info perform upload ${JSON.stringify(upload)}`)
+
+    refresh_api_login()
+    // get photo file
+    // .then(() => {
+    //     return http_get('/photo-details', {
+    //         local_path: upload.local_path
+    //     })
+    //     .then((photo_details_str) => {
+    //         return JSON.stringify(photo_details_str)
+    //     })
+    // })
+    // get photo upload session
+    .then((photo_details) => {
+        return new Promise(function(res, rej) {
+            facebook.api(
+                `${facebook_app_id}/uploads`,
+                'POST',
+                {
+                    file_length: upload.file_size,
+                    file_type: upload.mime_type
+                },
+                function(api_res) {
+                    if (api_res[FACE_RES_KEY_ERROR] !== undefined) {
+                        rej(api_res[FACE_RES_KEY_ERROR])
+                    }
+                    else {
+                        // resolve upload session id
+                        res(api_res['id'])
+                    }
+                }
+            )
+        })
+    })
+    // push photo file to facebook
+    .then((upload_session_id) => {
+        console.log(`debug photo upload session id = ${upload_session_id}`)
+
+        // TODO try the same with custom http_post and headers
+
+        return new Promise(function(res, rej) {
+            facebook.api(
+                `/${upload_session_id}`,
+                'POST',
+                {
+                    file_offset: 0,
+                    data_binary: `@${upload.local_path}`
+                },
+                function(api_res) {
+                    if (api_res[FACE_RES_KEY_ERROR] !== undefined) {
+                        rej(api_res[FACE_RES_KEY_ERROR])
+                    }
+                    else {
+                        // resolve facebook file handle/id
+                        res(api_res['h'])
+                    }
+                }
+            )
+        })
+    })
+    // add photo to album
+    .then((file_handle) => {
+        facebook.api(
+            `/${upload.album_id}/photos`,
+            'POST',
+            {
+                allow_spherical_photo: false,
+                spherical_metadata: null,
+                backdated_time: null,
+                backdated_time_granularity: null,
+                caption: null,
+                no_story: true
+            },
+            function(api_res) {
+                if (api_res[FACE_RES_KEY_ERROR] !== undefined) {
+                    rej(api_res[FACE_RES_KEY_ERROR])
+                }
+                else {
+                    res(api_res[FACE_RES_KEY_DATA])
+                }
+            }
+        )
+    })
 }
 
 /**

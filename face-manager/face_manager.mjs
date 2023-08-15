@@ -9,11 +9,12 @@ import path from 'node:path'
 import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
 import reverse_line_reader from 'reverse-line-reader'
+import mime from 'mime'
 
 const URL_PATH_AUTH_RESULT = '/authresult'
 const URL_PATH_FACE_APP_ID = '/facebook-app-id'
 const URL_PATH_NEXT_PHOTO_UPLOAD = '/next-album-photo'
-const URL_PATH_PHOTO_CONTENT = '/photo-content'
+const URL_PATH_PHOTO_DETAILS = '/photo-details'
 const SERVER_DIR = path.dirname(fileURLToPath(import.meta.url))
 const APP_DIR = path.join(SERVER_DIR, '..')
 const UPLOADS_FILE_NAME_DEFAULT = 'face_uploads.json.txt'
@@ -101,6 +102,8 @@ server.get(URL_PATH_NEXT_PHOTO_UPLOAD, function(req, res) {
              * @type {{
              *  local_path: string,
              *  index_idx: number,
+             *  mime_type: string,
+             *  file_size: number,
              *  exif_meta: Object,
              *  album_id: string,
              *  photo_id: string,
@@ -112,7 +115,7 @@ server.get(URL_PATH_NEXT_PHOTO_UPLOAD, function(req, res) {
                 photo_id: null,
                 caption: null
             }
-
+            
             if (last_upload !== undefined) {
                 logger.info(`last upload was ${JSON.stringify(last_upload)}`)
                 next_upload.index_idx = last_upload.index_idx + 1
@@ -123,24 +126,65 @@ server.get(URL_PATH_NEXT_PHOTO_UPLOAD, function(req, res) {
                 next_upload.index_idx = 0
             }
             
-            let file_id = index_keys[next_upload.index_idx]
+            let next_upload_found = false
+            /**
+             * @type {string}
+             */
+            let file_id
             /**
              * @type {string[]}
              */
-            let index_entry = index[file_id][0].split('//')
-            logger.debug(`next upload index entry for ${file_id} = ${index_entry}`)
-            // local path
-            next_upload.local_path = index_entry[0]
-            // exif metadata
-            if (index_entry.length > 1) {
-                next_upload.exif_meta = JSON.parse(index_entry[1])
+            let index_entry
+            /**
+             * @type {string}
+             */
+            let abs_path
+            while (!next_upload_found && next_upload.index_idx < index_keys.length) {
+                file_id = index_keys[next_upload.index_idx]
+                index_entry = index[file_id][0].split('//')
+                logger.debug(`next upload index entry for ${file_id} = ${index_entry}`)
+                // local path
+                next_upload.local_path = index_entry[0]
+                abs_path = path.join(cli_args.targetDir, next_upload.local_path)
+
+                // confirm next upload is an image w MIME type
+                logger.debug(`get MIME type of ${abs_path}`)
+                next_upload.mime_type = mime.getType(abs_path)
+                if (next_upload.mime_type !== null && next_upload.mime_type.startsWith('image/')) {
+                    next_upload_found = true
+                }
+                else {
+                    next_upload.index_idx++
+                }
+            }
+            
+            if (next_upload_found) {
+                // exif metadata
+                if (index_entry.length > 1) {
+                    next_upload.exif_meta = JSON.parse(index_entry[1])
+                }
+                else {
+                    next_upload.exif_meta = null
+                }
+
+                // file size
+                fs.stat(abs_path)
+                .then((stats) => {
+                    next_upload.file_size = stats.size
+                })
+                // deliver next upload
+                .then(() => {
+                    logger.info(`next upload = ${JSON.stringify(next_upload)}`)
+                    res.send(next_upload)
+                })
             }
             else {
-                next_upload.exif_meta = null
+                let message = `no more images to load in ${cli_args.targetDir}`
+                logger.info(message)
+                res.send({
+                    message: message
+                })
             }
-
-            logger.info(`next upload = ${JSON.stringify(next_upload)}`)
-            res.send(next_upload)
         },
         (err) => {
             let message = `failed to fetch last upload. cannot assume next upload. ${err.stack}`
@@ -151,11 +195,10 @@ server.get(URL_PATH_NEXT_PHOTO_UPLOAD, function(req, res) {
         }
     )
 })
-server.get(URL_PATH_PHOTO_CONTENT, function(req, res) {
+server.get(URL_PATH_PHOTO_DETAILS, function(req, res) {
     // path relative to target dir
-    let local_path = req.params['local_path']
-    let abs_path = path.join(path.dirname(cli_args.targetDir), local_path)
-    res.sendFile(abs_path)
+    const local_path = req.params['local_path']
+    const abs_path = path.join(cli_args.targetDir, local_path)
 })
 
 Promise.all([
@@ -231,8 +274,7 @@ function get_last_upload(uploads_file_path) {
  *  logLevel: string,
  *  indexFile: string,
  *  uploadsFile?: string,
- *  targetDir: string,
- *  sleep: boolean
+ *  targetDir: string
  * }}
  */
 function get_cli_args() {
