@@ -1,5 +1,6 @@
 const FACE_RES_KEY_ERROR = 'error'
 const FACE_RES_KEY_DATA = 'data'
+const FACE_API_VERSION = 'v17.0'
 
 /**
  * @type {{
@@ -10,6 +11,7 @@ const FACE_RES_KEY_DATA = 'data'
  */
 let facebook
 let facebook_app_id
+let server_host
 /**
  * @type {string}
  */
@@ -17,7 +19,7 @@ let api_token
 /**
  * @type {Date}
  */
-let api_token_expiry
+let api_token_expiry = new Date()
 
 window.addEventListener('load', () => {
     const temp_logger_console = document.getElementsByClassName(TempLogger.CMP_CONSOLE_CLASS)[0]
@@ -42,15 +44,17 @@ window.fbAsyncInit = function() {
     .then(() => {
         return http_get('/facebook-app-id')
     })
-    .then((facebook_app_id_str) => {
-        facebook_app_id = JSON.parse(facebook_app_id_str)['value']
+    .then((app_id_res) => {
+        app_id_res = JSON.parse(app_id_res)
+        facebook_app_id = app_id_res['app_id']
+        server_host = app_id_res['server_host']
         console.log(`info facebook-app-id=${facebook_app_id}`)
 
         facebook.init({
             appId            : facebook_app_id,
             autoLogAppEvents : true,
             xfbml            : true,
-            version          : 'v17.0'
+            version          : FACE_API_VERSION
         })
 
         console.log('info facebook api sdk ready')
@@ -116,11 +120,13 @@ function main() {
             console.log(`error cannot perform upload ${err.stack}`)
         }
     )
+    // TODO return upload to webserver and proceed to next upload
 }
 
 /**
  * @param {{
  *  local_path: string,
+ *  mount_path: string,
  *  index_idx: number,
  *  mime_type: string,
  *  file_size: number,
@@ -136,75 +142,87 @@ function do_upload(upload) {
     console.log(`info perform upload ${JSON.stringify(upload)}`)
 
     refresh_api_login()
-    // get photo file
+    // get photo upload session
     // .then(() => {
-    //     return http_get('/photo-details', {
-    //         local_path: upload.local_path
-    //     })
-    //     .then((photo_details_str) => {
-    //         return JSON.stringify(photo_details_str)
+    //     return new Promise(function(res, rej) {
+    //         facebook.api(
+    //             `${facebook_app_id}/uploads`,
+    //             'POST',
+    //             {
+    //                 file_length: upload.file_size,
+    //                 file_type: upload.mime_type
+    //             },
+    //             function(api_res) {
+    //                 if (api_res[FACE_RES_KEY_ERROR] !== undefined) {
+    //                     rej(api_res[FACE_RES_KEY_ERROR])
+    //                 }
+    //                 else {
+    //                     // resolve upload session id
+    //                     res(api_res['id'])
+    //                 }
+    //             }
+    //         )
     //     })
     // })
-    // get photo upload session
-    .then((photo_details) => {
-        return new Promise(function(res, rej) {
-            facebook.api(
-                `${facebook_app_id}/uploads`,
-                'POST',
-                {
-                    file_length: upload.file_size,
-                    file_type: upload.mime_type
-                },
-                function(api_res) {
-                    if (api_res[FACE_RES_KEY_ERROR] !== undefined) {
-                        rej(api_res[FACE_RES_KEY_ERROR])
-                    }
-                    else {
-                        // resolve upload session id
-                        res(api_res['id'])
-                    }
-                }
-            )
-        })
-    })
-    // push photo file to facebook
-    .then((upload_session_id) => {
-        console.log(`debug photo upload session id = ${upload_session_id}`)
+    // push photo file(s) to facebook via webserver as proxy
+    // .then((upload_session_id) => {
+    //     console.log(`debug photo upload session id = ${upload_session_id}`)
 
-        // TODO try the same with custom http_post and headers
+    //     return new Promise(function(res, rej) {
+    //         let url = new URL('/do-uploads', `${window.location.protocol}//${window.location.host}`)
+    //         url.searchParams.set('first_upload', JSON.stringify(upload))
+    //         url.searchParams.set('api_token', api_token)
+    //         url.searchParams.set('app_api_id', facebook_app_id)
+    //         url.searchParams.set('api_token_expiry', api_token_expiry.toISOString())
+    //         url.searchParams.set('api_version', FACE_API_VERSION)
+    //         url.searchParams.set('upload_session_id', upload_session_id)
 
-        return new Promise(function(res, rej) {
-            facebook.api(
-                `/${upload_session_id}`,
-                'POST',
-                {
-                    file_offset: 0,
-                    data_binary: `@${upload.local_path}`
-                },
-                function(api_res) {
-                    if (api_res[FACE_RES_KEY_ERROR] !== undefined) {
-                        rej(api_res[FACE_RES_KEY_ERROR])
-                    }
-                    else {
-                        // resolve facebook file handle/id
-                        res(api_res['h'])
-                    }
-                }
-            )
-        })
-    })
+    //         http_get(url)
+    //         .then(
+    //             (get_res_str) => {
+    //                 let get_res = JSON.parse(get_res_str)
+
+    //                 if (get_res.error !== undefined) {
+    //                     console.log(`error ${get_res.error}`)
+    //                     rej(get_res.error)
+    //                 }
+    //                 else {
+    //                     console.log(`info ${get_res.message}`)
+    //                     res(get_res_str)
+    //                 }
+    //             },
+    //             (err) => {
+    //                 console.log(`error ${err.stack}`)
+    //                 rej(err)
+    //             }
+    //         )
+    //     })
+    // })
     // add photo to album
-    .then((file_handle) => {
+    .then(() => {
+        let caption = 'Image file metadata:'
+        if (upload.exif_meta !== null) {
+            for (let [key, value] of Object.entries(upload.exif_meta)) {
+                caption += `\n${key}: ${value}`
+            }
+        }
+        caption += '\n\nUploaded by [file-manager/face-manager](https://github.com/ogallagher/...).'
+
+        upload.caption = caption
+        
         facebook.api(
             `/${upload.album_id}/photos`,
             'POST',
             {
-                allow_spherical_photo: false,
-                spherical_metadata: null,
+                allow_spherical_photo: undefined,
+                spherical_metadata: undefined,
+                // TODO parse create date[time] from exif metadata and use here
                 backdated_time: null,
                 backdated_time_granularity: null,
-                caption: null,
-                no_story: true
+                caption: upload.caption,
+                no_story: true,
+                // TODO port forward face-manager:80 to expose image to facebook
+                url: `http://${server_host}/mount/${upload.mount_path}/${upload.local_path}`
             },
             function(api_res) {
                 if (api_res[FACE_RES_KEY_ERROR] !== undefined) {
@@ -299,7 +317,6 @@ function refresh_api_login() {
          *  authResponse: {
          *      accessToken: string,
          *      expiresIn: string,
-         *      reauthorize_required_in: string,
          *      userID: string
          *  }
          * }} login_status 
@@ -307,11 +324,14 @@ function refresh_api_login() {
         function handle_login(login_status, renew = true) {
             let now = new Date()
             console.log(`debug facebook login status = ${login_status.status}`)
+            console.log(`debug ${JSON.stringify(login_status)}`)
     
             if (login_status.status === 'connected') {
-                api_token = login_status.accessToken
+                api_token = login_status.authResponse.accessToken
                 api_token_expiry = now
-                api_token_expiry.setSeconds(api_token_expiry.getSeconds() + login_status.reauthorize_required_in)
+                let api_token_expiry_sec = parseInt(login_status.authResponse.expiresIn)
+                console.log(`api token expires in ${api_token_expiry_sec} seconds`)
+                api_token_expiry.setSeconds(api_token_expiry.getSeconds() + api_token_expiry_sec)
                 res(api_token)
             }
             else if (renew) {

@@ -4,20 +4,22 @@ import { fileURLToPath } from 'node:url'
 import * as fs from 'node:fs/promises'
 import express from 'express'
 import https from 'https'
+import http from 'node:http'
 import cors from 'cors'
 import path from 'node:path'
 import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
 import reverse_line_reader from 'reverse-line-reader'
 import mime from 'mime'
+import request from 'request'
 
-const URL_PATH_AUTH_RESULT = '/authresult'
 const URL_PATH_FACE_APP_ID = '/facebook-app-id'
 const URL_PATH_NEXT_PHOTO_UPLOAD = '/next-album-photo'
-const URL_PATH_PHOTO_DETAILS = '/photo-details'
+const URL_PATH_DO_UPLOADS = '/do-uploads'
 const SERVER_DIR = path.dirname(fileURLToPath(import.meta.url))
 const APP_DIR = path.join(SERVER_DIR, '..')
 const UPLOADS_FILE_NAME_DEFAULT = 'face_uploads.json.txt'
+const TARGET_MOUNT_DIRNAME = 'mount'
 
 const cli_args = get_cli_args()
 
@@ -28,8 +30,48 @@ const logger = pino({
 })
 
 dotenv.config()
-process.env.SERVER_PORT = process.env.SERVER_PORT || 80
+process.env.SERVER_HOST = process.env.SERVER_HOST || 'localhost'
 logger.debug('loaded .env to process.env')
+
+/**
+ * Name of target directory, without path from app dir.
+ */
+let target_dir_name = path.basename(cli_args.targetDir)
+
+// mount target dir as symlink for public access
+fs.mkdir(TARGET_MOUNT_DIRNAME, {recursive: true})
+.then(
+    () => {
+        logger.info(`created mount dir at ${path.join(SERVER_DIR, TARGET_MOUNT_DIRNAME)}`)
+    },
+    (err) => {
+        if (err.code === 'EEXIST') {
+            logger.info(`mount dir ${TARGET_MOUNT_DIRNAME} already exists`)
+        }
+        else {
+            logger.error(`failed to create target mount dir ${err.stack}`)
+        }
+    }
+)
+.finally(() => {
+    fs.symlink(
+        path.relative(TARGET_MOUNT_DIRNAME, cli_args.targetDir), 
+        path.join(SERVER_DIR, TARGET_MOUNT_DIRNAME, target_dir_name)
+    )
+    .then(
+        () => {
+            logger.info(`mounted target dir ${cli_args.targetDir}`)
+        },
+        (err) => {
+            if (err.code === 'EEXIST') {
+                logger.info(`target dir ${cli_args.targetDir} already mounted`)
+            }
+            else {
+                logger.error(`failed to mount target dir ${cli_args.targetDir} at mount/. ${err.code}: ${err.stack}`)
+            }
+        }
+    )
+})
 
 // load index file
 const index_file_path = cli_args.indexFile
@@ -69,138 +111,277 @@ server.use(cors({
     origin: '*'
 }))
 
-server.use(express.static(SERVER_DIR))
-server.get('/', function(req, res) {
-    res.sendFile('./face_manager.html', {
-        root: SERVER_DIR
-    })
-})
-server.get(URL_PATH_FACE_APP_ID, function(req, res) {
-    logger.info(`send facebook app id for ${req.path}`)
-    res.send({
-        value: process.env.FACEBOOK_APP_ID
-    })
-})
-server.get(URL_PATH_NEXT_PHOTO_UPLOAD, function(req, res) {
-    logger.info(`send next photo to upload for ${req.path}`)
+// webserver endpoints
 
-    get_last_upload(uploads_file_path)
-    .then(
-        /**
-         * @param {undefined|{
-         *  local_path: string,
-         *  index_idx: number,
-         *  album_id: string,
-         *  photo_id: string,
-         *  caption: string
-         * }} last_upload
-        */
-        (last_upload) => {
+server.use(express.static(SERVER_DIR))
+
+server.get(
+    '/', 
+    /**
+     * 
+     * @param {express.Request} req 
+     * @param {express.Response} res 
+     */
+    function(req, res) {
+        res.sendFile('./face_manager.html', {
+            root: SERVER_DIR
+        })
+    }
+)
+
+server.get(
+    URL_PATH_FACE_APP_ID, 
+    /**
+     * 
+     * @param {express.Request} req 
+     * @param {express.Response} res 
+     */
+    function(req, res) {
+        logger.info(`send facebook app id for ${req.path}`)
+        res.send({
+            app_id: process.env.FACEBOOK_APP_ID,
+            server_host: process.env.SERVER_HOST
+        })
+    }
+)
+
+server.get(
+    URL_PATH_NEXT_PHOTO_UPLOAD, 
+    /**
+     * Get the next photo to upload. 
+     * 
+     * If there exists a latest complete upload entry in the uploads file, attempt to select the next image file,
+     * according to the index.
+     * If uploads is empty, select the first image file from the index.
+     * 
+     * @param {express.Request} req 
+     * @param {express.Response} res 
+     */
+    function(req, res) {
+        logger.info(`send next photo to upload for ${req.path}`)
+
+        get_last_upload(uploads_file_path)
+        .then(
             /**
-             * Next photo upload details. Note `local_path` is relative to the target dir.
-             * 
-             * @type {{
+             * @param {undefined|{
              *  local_path: string,
              *  index_idx: number,
-             *  mime_type: string,
-             *  file_size: number,
-             *  exif_meta: Object,
              *  album_id: string,
              *  photo_id: string,
              *  caption: string
-             * }}
-             */
-            let next_upload = {
-                album_id: null,
-                photo_id: null,
-                caption: null
-            }
-            
-            if (last_upload !== undefined) {
-                logger.info(`last upload was ${JSON.stringify(last_upload)}`)
-                next_upload.index_idx = last_upload.index_idx + 1
-                next_upload.album_id = last_upload.album_id
-            }
-            else {
-                logger.info('last upload not found; assume next upload is first in index')
-                next_upload.index_idx = 0
-            }
-            
-            let next_upload_found = false
-            /**
-             * @type {string}
-             */
-            let file_id
-            /**
-             * @type {string[]}
-             */
-            let index_entry
-            /**
-             * @type {string}
-             */
-            let abs_path
-            while (!next_upload_found && next_upload.index_idx < index_keys.length) {
-                file_id = index_keys[next_upload.index_idx]
-                index_entry = index[file_id][0].split('//')
-                logger.debug(`next upload index entry for ${file_id} = ${index_entry}`)
-                // local path
-                next_upload.local_path = index_entry[0]
-                abs_path = path.join(cli_args.targetDir, next_upload.local_path)
-
-                // confirm next upload is an image w MIME type
-                logger.debug(`get MIME type of ${abs_path}`)
-                next_upload.mime_type = mime.getType(abs_path)
-                if (next_upload.mime_type !== null && next_upload.mime_type.startsWith('image/')) {
-                    next_upload_found = true
+             * }} last_upload
+            */
+            (last_upload) => {
+                /**
+                 * Next photo upload details. Note `local_path` is relative to the target dir.
+                 * 
+                 * @type {{
+                 *  local_path: string,
+                 *  mount_path: string,
+                 *  index_idx: number,
+                 *  mime_type: string,
+                 *  file_size: number,
+                 *  exif_meta: Object,
+                 *  album_id: string,
+                 *  photo_id: string,
+                 *  caption: string
+                 * }}
+                 */
+                let next_upload = {
+                    album_id: null,
+                    photo_id: null,
+                    caption: null
+                }
+                
+                if (last_upload !== undefined) {
+                    logger.info(`last upload was ${JSON.stringify(last_upload)}`)
+                    next_upload.index_idx = last_upload.index_idx + 1
+                    next_upload.album_id = last_upload.album_id
                 }
                 else {
-                    next_upload.index_idx++
+                    logger.info('last upload not found; assume next upload is first in index')
+                    next_upload.index_idx = 0
                 }
-            }
-            
-            if (next_upload_found) {
-                // exif metadata
-                if (index_entry.length > 1) {
-                    next_upload.exif_meta = JSON.parse(index_entry[1])
+                
+                let next_upload_found = false
+                /**
+                 * @type {string}
+                 */
+                let file_id
+                /**
+                 * @type {string[]}
+                 */
+                let index_entry
+                /**
+                 * @type {string}
+                 */
+                let abs_path
+                while (!next_upload_found && next_upload.index_idx < index_keys.length) {
+                    file_id = index_keys[next_upload.index_idx]
+                    index_entry = index[file_id][0].split('//')
+                    logger.debug(`next upload index entry for ${file_id} = ${index_entry}`)
+                    // local path
+                    next_upload.local_path = index_entry[0]
+                    abs_path = path.join(cli_args.targetDir, next_upload.local_path)
+
+                    // confirm next upload is an image w MIME type
+                    logger.debug(`get MIME type of ${abs_path}`)
+                    next_upload.mime_type = mime.getType(abs_path)
+                    if (next_upload.mime_type !== null && next_upload.mime_type.startsWith('image/')) {
+                        next_upload_found = true
+                    }
+                    else {
+                        next_upload.index_idx++
+                    }
+                }
+                
+                if (next_upload_found) {
+                    // mount path
+                    next_upload.mount_path = path.join(TARGET_MOUNT_DIRNAME, target_dir_name)
+
+                    // exif metadata
+                    if (index_entry.length > 1) {
+                        next_upload.exif_meta = JSON.parse(index_entry[1])
+                    }
+                    else {
+                        next_upload.exif_meta = null
+                    }
+
+                    // file size
+                    fs.stat(abs_path)
+                    .then((stats) => {
+                        next_upload.file_size = stats.size
+                    })
+                    // deliver next upload
+                    .then(() => {
+                        logger.info(`next upload = ${JSON.stringify(next_upload)}`)
+                        res.send(next_upload)
+                    })
                 }
                 else {
-                    next_upload.exif_meta = null
+                    let message = `no more images to load in ${cli_args.targetDir}`
+                    logger.info(message)
+                    res.send({
+                        message: message
+                    })
                 }
-
-                // file size
-                fs.stat(abs_path)
-                .then((stats) => {
-                    next_upload.file_size = stats.size
-                })
-                // deliver next upload
-                .then(() => {
-                    logger.info(`next upload = ${JSON.stringify(next_upload)}`)
-                    res.send(next_upload)
+            },
+            (err) => {
+                let message = `failed to fetch last upload. cannot assume next upload. ${err.stack}`
+                logger.error(message)
+                res.send({
+                    error: message
                 })
             }
-            else {
-                let message = `no more images to load in ${cli_args.targetDir}`
+        )
+    }
+)
+
+server.get(
+    URL_PATH_DO_UPLOADS, 
+    /**
+     * Receive photo upload session, api credentials, and first upload details.
+     * @deprecated Does not work using file upload separate from post to album.
+     */
+    function(req, res) {
+        /**
+         * @type {{
+         *  first_upload: string|{
+         *      local_path: string,
+         *      index_idx: number,
+         *      mime_type: string,
+         *      file_size: number,
+         *      exif_meta: {},
+         *      album_id: string,
+         *      photo_id: string,
+         *      caption: string
+         *  },
+         *  api_token: string,
+         *  api_app_id: string,
+         *  api_token_expiry: string|Date,
+         *  api_version: string,
+         *  upload_session_id: string
+         * }}
+         */
+        let args = req.query
+        // type casting
+        args.first_upload = JSON.parse(args.first_upload)
+        logger.info(
+            `perform uploads to facebook for ${URL_PATH_DO_UPLOADS} `
+            + `starting from ${JSON.stringify(args.first_upload)}`
+        )
+        args.api_token_expiry = new Date(args.api_token_expiry)
+
+        let abs_path = path.join(cli_args.targetDir, args.first_upload.local_path)
+        let upload_url = new URL(
+            `https://graph.facebook.com/${args.api_version}/${args.upload_session_id}`
+        )
+
+        fs.readFile(abs_path, {encoding: null})
+        .then(
+            (file_data) => {
+                request(
+                    {
+                        url: upload_url,
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `OAuth ${req.params.api_token}`,
+                            'file_offset': 0
+                        },
+                        encoding: null,
+                        body: file_data
+                    },
+                    (upload_err, upload_res, body) => {
+                        if (upload_err !== undefined) {
+                            let message = (
+                                `unable to complete upload of ${args.first_upload.local_path} `
+                                + `to ${upload_url}. ${upload_err} ${body}`
+                            )
+                            logger.error(message)
+
+                            // save upload failure
+                        }
+                        else {
+                            logger.info(`upload response for ${args.first_upload.local_path}: ${upload_res.body}`)
+
+                            // save new last upload
+
+                            // save new facebook file handle/reference to send to webpage when requested
+
+                            // start next upload
+                        }
+                    }
+                )
+
+                // confirm began first upload w webpage
+                let message = (
+                    `began first upload for ${args.first_upload.local_path}. `
+                    + `poll <endpoint> to get progress updates`
+                )
                 logger.info(message)
                 res.send({
                     message: message
                 })
+            },
+            /**
+             * Image file read failure.
+             * @param {Error} err 
+             */
+            (err) => {
+                let message = (
+                    `failed to get contents of ${abs_path} for upload ${args.first_upload}. \n`
+                    + err.stack
+                )
+                logger.error(message)
+                res.send({
+                    error: message
+                })
             }
-        },
-        (err) => {
-            let message = `failed to fetch last upload. cannot assume next upload. ${err.stack}`
-            logger.error(message)
-            res.send({
-                error: message
-            })
-        }
-    )
-})
-server.get(URL_PATH_PHOTO_DETAILS, function(req, res) {
-    // path relative to target dir
-    const local_path = req.params['local_path']
-    const abs_path = path.join(cli_args.targetDir, local_path)
-})
+        )
+    }
+)
 
+// serve http:80 and https:443
 Promise.all([
     /*
     create self signed cert and private key:
@@ -222,8 +403,9 @@ Promise.all([
         server
     )
     server_https.listen(443, () => {
-        logger.info(`deployed face-manager at localhost, serving local dir ${SERVER_DIR}`)
+        logger.info(`deployed face-manager at ${process.env.SERVER_HOST}, serving local dir ${SERVER_DIR}`)
     })
+    http.createServer(server).listen(80)
 })
 
 /**
@@ -232,6 +414,11 @@ Promise.all([
  * 
  * @returns {{
  *  local_path: string,
+ *  mount_path: string,
+ *  index_idx: string,
+ *  mime_type: string,
+ *  file_size: number,
+ *  exif_meta: Object,
  *  album_id: string,
  *  photo_id: string,
  *  caption: string
