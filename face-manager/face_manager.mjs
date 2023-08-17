@@ -11,7 +11,6 @@ import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
 import reverse_line_reader from 'reverse-line-reader'
 import mime from 'mime'
-import request from 'request'
 
 const URL_PATH_FACE_APP_ID = '/facebook-app-id'
 const URL_PATH_NEXT_PHOTO_UPLOAD = '/next-album-photo'
@@ -268,110 +267,6 @@ server.get(
             },
             (err) => {
                 let message = `failed to fetch last upload. cannot assume next upload. ${err.stack}`
-                logger.error(message)
-                res.send({
-                    error: message
-                })
-            }
-        )
-    }
-)
-
-server.get(
-    URL_PATH_DO_UPLOADS, 
-    /**
-     * Receive photo upload session, api credentials, and first upload details.
-     * @deprecated Does not work using file upload separate from post to album.
-     */
-    function(req, res) {
-        /**
-         * @type {{
-         *  first_upload: string|{
-         *      local_path: string,
-         *      index_idx: number,
-         *      mime_type: string,
-         *      file_size: number,
-         *      exif_meta: {},
-         *      album_id: string,
-         *      photo_id: string,
-         *      caption: string
-         *  },
-         *  api_token: string,
-         *  api_app_id: string,
-         *  api_token_expiry: string|Date,
-         *  api_version: string,
-         *  upload_session_id: string
-         * }}
-         */
-        let args = req.query
-        // type casting
-        args.first_upload = JSON.parse(args.first_upload)
-        logger.info(
-            `perform uploads to facebook for ${URL_PATH_DO_UPLOADS} `
-            + `starting from ${JSON.stringify(args.first_upload)}`
-        )
-        args.api_token_expiry = new Date(args.api_token_expiry)
-
-        let abs_path = path.join(cli_args.targetDir, args.first_upload.local_path)
-        let upload_url = new URL(
-            `https://graph.facebook.com/${args.api_version}/${args.upload_session_id}`
-        )
-
-        fs.readFile(abs_path, {encoding: null})
-        .then(
-            (file_data) => {
-                request(
-                    {
-                        url: upload_url,
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `OAuth ${req.params.api_token}`,
-                            'file_offset': 0
-                        },
-                        encoding: null,
-                        body: file_data
-                    },
-                    (upload_err, upload_res, body) => {
-                        if (upload_err !== undefined) {
-                            let message = (
-                                `unable to complete upload of ${args.first_upload.local_path} `
-                                + `to ${upload_url}. ${upload_err} ${body}`
-                            )
-                            logger.error(message)
-
-                            // save upload failure
-                        }
-                        else {
-                            logger.info(`upload response for ${args.first_upload.local_path}: ${upload_res.body}`)
-
-                            // save new last upload
-
-                            // save new facebook file handle/reference to send to webpage when requested
-
-                            // start next upload
-                        }
-                    }
-                )
-
-                // confirm began first upload w webpage
-                let message = (
-                    `began first upload for ${args.first_upload.local_path}. `
-                    + `poll <endpoint> to get progress updates`
-                )
-                logger.info(message)
-                res.send({
-                    message: message
-                })
-            },
-            /**
-             * Image file read failure.
-             * @param {Error} err 
-             */
-            (err) => {
-                let message = (
-                    `failed to get contents of ${abs_path} for upload ${args.first_upload}. \n`
-                    + err.stack
-                )
                 logger.error(message)
                 res.send({
                     error: message

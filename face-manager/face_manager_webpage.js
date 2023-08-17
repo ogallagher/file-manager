@@ -142,97 +142,73 @@ function do_upload(upload) {
     console.log(`info perform upload ${JSON.stringify(upload)}`)
 
     refresh_api_login()
-    // get photo upload session
-    // .then(() => {
-    //     return new Promise(function(res, rej) {
-    //         facebook.api(
-    //             `${facebook_app_id}/uploads`,
-    //             'POST',
-    //             {
-    //                 file_length: upload.file_size,
-    //                 file_type: upload.mime_type
-    //             },
-    //             function(api_res) {
-    //                 if (api_res[FACE_RES_KEY_ERROR] !== undefined) {
-    //                     rej(api_res[FACE_RES_KEY_ERROR])
-    //                 }
-    //                 else {
-    //                     // resolve upload session id
-    //                     res(api_res['id'])
-    //                 }
-    //             }
-    //         )
-    //     })
-    // })
-    // push photo file(s) to facebook via webserver as proxy
-    // .then((upload_session_id) => {
-    //     console.log(`debug photo upload session id = ${upload_session_id}`)
-
-    //     return new Promise(function(res, rej) {
-    //         let url = new URL('/do-uploads', `${window.location.protocol}//${window.location.host}`)
-    //         url.searchParams.set('first_upload', JSON.stringify(upload))
-    //         url.searchParams.set('api_token', api_token)
-    //         url.searchParams.set('app_api_id', facebook_app_id)
-    //         url.searchParams.set('api_token_expiry', api_token_expiry.toISOString())
-    //         url.searchParams.set('api_version', FACE_API_VERSION)
-    //         url.searchParams.set('upload_session_id', upload_session_id)
-
-    //         http_get(url)
-    //         .then(
-    //             (get_res_str) => {
-    //                 let get_res = JSON.parse(get_res_str)
-
-    //                 if (get_res.error !== undefined) {
-    //                     console.log(`error ${get_res.error}`)
-    //                     rej(get_res.error)
-    //                 }
-    //                 else {
-    //                     console.log(`info ${get_res.message}`)
-    //                     res(get_res_str)
-    //                 }
-    //             },
-    //             (err) => {
-    //                 console.log(`error ${err.stack}`)
-    //                 rej(err)
-    //             }
-    //         )
-    //     })
-    // })
     // add photo to album
     .then(() => {
+        /**
+         * @type {string}
+         */
         let caption = 'Image file metadata:'
+        /**
+         * @type {Date|null}
+         */
+        let datetime = null
+        // extract exif metadata
         if (upload.exif_meta !== null) {
             for (let [key, value] of Object.entries(upload.exif_meta)) {
                 caption += `\n${key}: ${value}`
             }
+
+            if (upload.exif_meta['DateTime'] !== undefined) {
+                datetime = parse_exif_datetime(upload.exif_meta['DateTime'])
+            }
         }
         caption += '\n\nUploaded by [file-manager/face-manager](https://github.com/ogallagher/...).'
-
         upload.caption = caption
         
-        facebook.api(
-            `/${upload.album_id}/photos`,
-            'POST',
-            {
-                allow_spherical_photo: undefined,
-                spherical_metadata: undefined,
-                // TODO parse create date[time] from exif metadata and use here
-                backdated_time: null,
-                backdated_time_granularity: null,
-                caption: upload.caption,
-                no_story: true,
-                // TODO port forward face-manager:80 to expose image to facebook
-                url: `http://${server_host}/mount/${upload.mount_path}/${upload.local_path}`
-            },
-            function(api_res) {
-                if (api_res[FACE_RES_KEY_ERROR] !== undefined) {
-                    rej(api_res[FACE_RES_KEY_ERROR])
+        return new Promise(function(res, rej) {
+            // share dialog also not working if server_host is "top-level-domain" (including ip address),
+            // and modifying the popup DOM would be another challenge
+            FB.ui(
+                {
+                    method: 'share',
+                    href: `http://${server_host}/mount/${upload.mount_path}/${upload.local_path}`,
+                    display: 'popup'
+                }, 
+                (share_res) => {
+                    if (share_res.error_message !== undefined) {
+                        rej(share_res.error_message)
+                    }
+                    else {
+                        res('success')
+                    }
                 }
-                else {
-                    res(api_res[FACE_RES_KEY_DATA])
-                }
-            }
-        )
+            )
+
+            // publish photo to album is deprecated; use share dialog
+            // facebook.api(
+            //     `/${upload.album_id}/photos`,
+            //     'POST',
+            //     {
+            //         allow_spherical_photo: undefined,
+            //         spherical_metadata: undefined,
+            //         backdated_time: (
+            //             datetime == null ? undefined : datetime.toISOString()
+            //         ),
+            //         backdated_time_granularity: 'min',
+            //         caption: upload.caption,
+            //         no_story: true,
+            //         url: `http://${server_host}/mount/${upload.mount_path}/${upload.local_path}`
+            //     },
+            //     function(api_res) {
+            //         if (api_res[FACE_RES_KEY_ERROR] !== undefined) {
+            //             rej(api_res[FACE_RES_KEY_ERROR])
+            //         }
+            //         else {
+            //             res(api_res[FACE_RES_KEY_DATA])
+            //         }
+            //     }
+            // )
+        })
     })
 }
 
@@ -418,4 +394,17 @@ function http_post(url, body, responseType='') {
             rej(new Error(`error failed to post to ${url}. ${http.responseText} ${e}`))
         }
     })
+}
+
+/**
+ * Parse known exif datetime string formats as `Date` instances.
+ * 
+ * @param {string} exif_dt 
+ * @returns {Date}
+ */
+function parse_exif_datetime(exif_dt) {
+    let date_str = exif_dt.substring(0,10).replace(/:/g, '-')
+    let time_str = exif_dt.substring(11, exif_dt.length)
+
+    return new Date(`${date_str}T${time_str}`)
 }
